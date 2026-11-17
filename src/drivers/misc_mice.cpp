@@ -2,9 +2,11 @@
 //  * Motospeed X6 (Realtek VID 0BDA, receivers FFE0 / FFF2, interface 4): output report B5 [06],
 //    reply report B4, byte 20 = level (+128 while charging). The cable (FFF1) reports no battery.
 //    From github.com/Jacobz888/LGSTrayBattery-MotospeedX6.
-//  * Xenta receivers (Delux M900 Pro, Attack Shark X6 / R1 / X11 / X3 Max / V3 Pro; VID 1D57): the receiver
+//  * Xenta receivers (Delux M900 Pro, Attack Shark X6 / R1 / X11 / X3 Max / V3 Pro / V6; VID 1D57): the receiver
 //    broadcasts input report 03 on usage page 000A every ~2 s: [03][model][40][state][percent],
 //    state 2 = full, 3 = charging (percent frozen). From github.com/AeonArcHQ/omarchy-delux-m900.
+//    The Attack Shark V6 (model 24) sends 41 instead of 40 in byte 2 ("03 24 41 01 64" on battery at
+//    100%, read from a 1D57:FA60 receiver), so both values are accepted.
 //    The collection is push-only (no output or feature report), so it is opened read-only, as BatteryTray
 //    and attackshark-battery-windows do: a read/write open fails while a vendor app holds it without
 //    sharing write access. `--dump` also prints the raw frames it sends, to add models such as the
@@ -108,7 +110,7 @@ void PollMotospeed(PollContext& ctx) {
 }
 
 // Xenta receiver (1D57:FA60, also FA65; cable FA55 / 2155), used by Delux and Attack Shark mice.
-// The receiver broadcasts [03][model][40][state][level] every ~2 s; nothing is sent to it. The handle
+// The receiver broadcasts [03][model][40 or 41][state][level] every ~2 s; nothing is sent to it. The handle
 // stays open between polls so these frames queue up. A reading counts once two frames agree, because
 // every link-up starts with a false 100% (github.com/qu1ncky/BatteryTray, XentaReceiverProvider).
 struct XentaModel { BYTE code; const wchar_t* name; bool tens; };
@@ -117,6 +119,7 @@ const XentaModel kXentaModels[] = {
     { 0x55, L"Attack Shark X11", false },
     { 0x4E, L"Attack Shark X3 Max", false },
     { 0xE5, L"Attack Shark V3 Pro", false },
+    { 0x24, L"Attack Shark V6", false },
     { 0x10, L"Attack Shark X6 / R1", true },  // level reported in tens (0-10)
 };
 
@@ -148,7 +151,7 @@ void PollXenta(PollContext& ctx) {
                 int wait = fresh && got < 2 ? (int)std::max<LONGLONG>(1, (LONGLONG)until - (LONGLONG)GetTickCount64()) : 30;
                 if (fresh && got < 2 && (LONGLONG)until - (LONGLONG)GetTickCount64() <= 0) break;
                 if (l.dev->Read(r, wait) < 5) break;
-                if (r[0] != 0x03 || r[2] != 0x40) continue;
+                if (r[0] != 0x03 || (r[2] != 0x40 && r[2] != 0x41)) continue;
                 l.prev = l.last;
                 l.last.assign(r.begin(), r.begin() + 5);
                 l.lastFrameAt = GetTickCount64();
