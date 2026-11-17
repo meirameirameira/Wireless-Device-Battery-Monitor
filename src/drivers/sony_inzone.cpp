@@ -75,16 +75,10 @@ Reply GetBattery(HidDev& d, size_t minPayload, std::vector<BYTE>& payload) {
     return Reply::NoReply;
 }
 
-// Lowest bud charge percent, or -1 when both are docked. FF = docked
-// Values > 100 are invalid and skipped.
-int LowestBudOut(const std::vector<BYTE>& p) {
-    int lvl = -1;
-    for (int i : { 1, 3 }) {
-        if (p[i] > 100) continue;
-        lvl = lvl < 0 ? p[i] : std::min<int>(lvl, p[i]);
-    }
-    return lvl;
-}
+// Bud/case percent from the Buds reply, or -1 when unknown (FF = bud docked in the case; > 100 invalid).
+int BudLevel(BYTE v) { return v <= 100 ? v : -1; }
+
+std::wstring Pct(int v) { return v >= 0 ? std::to_wstring(v) + L"%" : L"-"; }
 
 }  // namespace
 
@@ -104,6 +98,13 @@ void PollSonyInzone(PollContext& ctx) {
             s.via = L"2.4 GHz receiver";
             return s;
         };
+        auto budStatus = [&](int side) {  // 0 = left, 1 = right
+            DeviceStatus s = status();
+            s.key += side == 0 ? L":L" : L":R";
+            s.name += side == 0 ? L" (L)" : L" (R)";
+            s.badge = side == 0 ? L"L" : L"R";
+            return s;
+        };
         bool added = false, noReply = false;
         auto filter = [](const HidColl& c) { return c.page() == 0xFF04 && c.outLen() >= 64; };
         for (const HidColl* c : ctx.Find(0x054C, m.pid, filter)) {
@@ -113,27 +114,36 @@ void PollSonyInzone(PollContext& ctx) {
             Reply reply = GetBattery(d, m.minPayload, p);
             if (reply == Reply::NoReply) noReply = true;
             if (reply != Reply::Ok) continue;
-            DeviceStatus s = status();
             if (m.buds) {
-                int lvl = LowestBudOut(p);
-                s.connected = lvl >= 0;
-                s.percent = lvl;
+                // One entry (and tray icon) per earbud; the case level goes in the tooltip.
+                int caseLvl = p.size() >= 6 ? BudLevel(p[5]) : -1;
+                for (int side = 0; side < 2; side++) {
+                    int lvl = BudLevel(p[side == 0 ? 1 : 3]);
+                    DeviceStatus s = budStatus(side);
+                    s.connected = lvl >= 0;  // docked bud: hidden until it leaves the case
+                    s.percent = lvl;
+                    if (caseLvl >= 0) s.detail = L"case " + Pct(caseLvl);
+                    ctx.Add(s, 0x054C, m.pid);
+                }
             } else {
+                DeviceStatus s = status();
                 bool offline = p[1] == 0xFF;
                 s.connected = !offline;
                 s.percent = offline ? -1 : (p[1] <= 100 ? p[1] : -1);
                 s.charging = p[0] != 0;
+                ctx.Add(s, 0x054C, m.pid);
             }
-            ctx.Add(s, 0x054C, m.pid);
             added = true;
             break;
         }
         // Buds: the dongle took the request but no collection answered, which is what it does with both
         // buds in the case. Add them as not connected (hidden) rather than treating the dongle as missing.
         if (m.buds && noReply && !added) {
-            DeviceStatus s = status();
-            s.connected = false;
-            ctx.Add(s, 0x054C, m.pid);
+            for (int side = 0; side < 2; side++) {
+                DeviceStatus s = budStatus(side);
+                s.connected = false;
+                ctx.Add(s, 0x054C, m.pid);
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ struct WidgetItem {
     DeviceKind kind = DeviceKind::Other;
     int  percent  = -1;     // -1 = unknown
     std::wstring text;      // shown instead of the percentage when set (coarse levels like "Low")
+    std::wstring badge;     // small tag after the icon ("L" / "R"), empty for none
     bool charging = false;
     bool dim      = false;  // asleep / stale value
     bool low      = false;

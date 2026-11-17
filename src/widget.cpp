@@ -214,7 +214,7 @@ struct Canvas {
     }
 };
 
-struct Piece { Mask m; Rgb color; int alpha; int gapAfter; };
+struct Piece { Mask m; Rgb color; int alpha; int gapAfter; int dy = 0; };  // dy: offset from centred
 
 std::vector<Piece> Layout(int& width) {
     Rgb fg = g_light ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 };
@@ -223,6 +223,7 @@ std::vector<Piece> Layout(int& width) {
     HFONT icons = MakeFont(Px(16), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
     HFONT bolt = MakeFont(Px(11), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
     HFONT text = MakeFont(Px(13), FW_NORMAL, L"Segoe UI Variable Text", L"Segoe UI");
+    HFONT badge = MakeFont(Px(10), FW_BOLD, L"Segoe UI Variable Text", L"Segoe UI");
 
     std::vector<Piece> out;
     if (g_items.empty()) out.push_back({ RenderMask(std::wstring(1, kBatteryUnknown), icons), fg, 110, 0 });
@@ -231,6 +232,10 @@ std::vector<Piece> Layout(int& width) {
         int a = it.dim ? 120 : 255;
         Rgb tc = it.low ? red : fg;
         out.push_back({ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons), fg, a, Px(5) });
+        if (!it.badge.empty()) {  // subscript-style tag tucked against the icon
+            out.back().gapAfter = Px(1);
+            out.push_back({ RenderMask(it.badge, badge), fg, a, Px(4), Px(4) });
+        }
         std::wstring t = !it.text.empty() ? it.text : it.percent >= 0 ? std::to_wstring(it.percent) + L"%" : L"?";
         out.push_back({ RenderMask(t, text), tc, a, it.charging ? Px(2) : 0 });
         if (it.charging) out.push_back({ RenderMask(std::wstring(1, kBolt), bolt), charge, a, 0 });
@@ -239,6 +244,7 @@ std::vector<Piece> Layout(int& width) {
     DeleteObject(icons);
     DeleteObject(bolt);
     DeleteObject(text);
+    DeleteObject(badge);
 
     width = Px(8) * 2;
     for (auto& p : out) width += p.m.w + p.gapAfter;
@@ -273,7 +279,7 @@ void Paint() {
 
     int x = Px(8);
     for (auto& p : pieces) {
-        cv.Draw(p.m, x, (H - p.m.h) / 2, p.color, p.alpha);
+        cv.Draw(p.m, x, (H - p.m.h) / 2 + p.dy, p.color, p.alpha);
         x += p.m.w + p.gapAfter;
     }
 
